@@ -36,15 +36,31 @@ if (!(Test-Path $PluginSkills)) {
     Write-Host "联接已存在: $PluginSkills"
 }
 
-Write-Host "==> [4/4] 同步全局 AGENTS.md 规则..." -ForegroundColor Cyan
+Write-Host "==> [4/4] 链接全局 AGENTS.md 规范 (Antigravity / kimi-code / dsh)..." -ForegroundColor Cyan
 $SrcAgentsMd = Join-Path $DestDir "AGENTS.md"
-$DstAgentsMd = Join-Path $GlobalAgentsMdDir "AGENTS.md"
+$AgentDirs = @(
+    (Join-Path $HOME ".gemini\config"),
+    (Join-Path $HOME ".kimi-code"),
+    (Join-Path $HOME ".dsh")
+)
+
 if (Test-Path $SrcAgentsMd) {
-    if (!(Test-Path $GlobalAgentsMdDir)) {
-        New-Item -ItemType Directory -Force -Path $GlobalAgentsMdDir | Out-Null
+    foreach ($dir in $AgentDirs) {
+        if (!(Test-Path $dir)) {
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        }
+        $targetFile = Join-Path $dir "AGENTS.md"
+        if (Test-Path $targetFile) {
+            Remove-Item -Force $targetFile
+        }
+        try {
+            New-Item -ItemType SymbolicLink -Path $targetFile -Target $SrcAgentsMd -ErrorAction Stop | Out-Null
+            Write-Host "已建立符号链接: $targetFile -> $SrcAgentsMd"
+        } catch {
+            New-Item -ItemType HardLink -Path $targetFile -Target $SrcAgentsMd -ErrorAction Stop | Out-Null
+            Write-Host "已建立硬链接: $targetFile <=> $SrcAgentsMd"
+        }
     }
-    Copy-Item -Path $SrcAgentsMd -Destination $DstAgentsMd -Force
-    Write-Host "已同步规则至: $DstAgentsMd"
 }
 
-Write-Host "`n✔ 安装完成！Antigravity 已就绪并加载所有 Skills 与全局规则。" -ForegroundColor Green
+Write-Host "`n✔ 安装完成！Antigravity、kimi-code 与 dsh 已就绪并共享所有 Skills 与规范。" -ForegroundColor Green

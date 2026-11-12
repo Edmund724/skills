@@ -14,7 +14,10 @@ irm https://raw.githubusercontent.com/Edmund724/skills/main/install.ps1 | iex
 1. 克隆 / 更新仓库到 `~/.agents/skills`
 2. 创建 Antigravity 插件目录 `~/.gemini/config/plugins/user-skills` 及配置
 3. 建立 `~/.gemini/config/plugins/user-skills/skills` 到 `~/.agents/skills` 的目录联接（Junction）
-4. 同步 `AGENTS.md` 行为准则至全局配置 `~/.gemini/config/AGENTS.md`
+4. 将 `AGENTS.md` 规范以软/硬链接形式自动挂载至各个 Agent 全局目录：
+   - `~/.gemini/config/AGENTS.md` (Antigravity)
+   - `~/.kimi-code/AGENTS.md` (kimi-code)
+   - `~/.dsh/AGENTS.md` (dsh)
 
 ## 日常更新
 
