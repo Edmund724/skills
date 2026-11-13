@@ -92,6 +92,30 @@ function Set-DirectoryJunction {
     Invoke-Native { cmd /c mklink /J "$LinkPath" "$TargetPath" } "创建目录联接失败: $LinkPath -> $TargetPath"
 }
 
+function Set-FileLink {
+    param(
+        [Parameter(Mandatory)] [string]$LinkPath,
+        [Parameter(Mandatory)] [string]$TargetPath
+    )
+    if (-not (Test-Path -LiteralPath $TargetPath)) {
+        throw "未找到源文件: $TargetPath"
+    }
+    $parentDir = Split-Path -Parent $LinkPath
+    if (-not (Test-Path -LiteralPath $parentDir)) {
+        New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
+    }
+    if (Get-Item -LiteralPath $LinkPath -Force -ErrorAction SilentlyContinue) {
+        Remove-Item -LiteralPath $LinkPath -Force
+    }
+    try {
+        New-Item -ItemType SymbolicLink -Path $LinkPath -Target $TargetPath -ErrorAction Stop | Out-Null
+        Write-Host "已建立符号链接: $LinkPath -> $TargetPath"
+    } catch {
+        New-Item -ItemType HardLink -Path $LinkPath -Target $TargetPath -ErrorAction Stop | Out-Null
+        Write-Host "已建立硬链接: $LinkPath <=> $TargetPath"
+    }
+}
+
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     throw "未检测到 git，请先安装 Git 后重试。"
 }
@@ -126,10 +150,6 @@ Set-DirectoryJunction -LinkPath $PluginSkills -TargetPath $DestDir
 
 Write-Host "==> [4/5] 链接全局 AGENTS.md 规范 (Antigravity / kimi-code / dsh)..." -ForegroundColor Cyan
 $SrcAgentsMd = Join-Path $DestDir "AGENTS.md"
-if (-not (Test-Path -LiteralPath $SrcAgentsMd)) {
-    throw "未找到源规范文件: $SrcAgentsMd"
-}
-
 $AgentDirs = @(
     (Join-Path $HOME ".gemini\config"),
     (Join-Path $HOME ".kimi-code"),
@@ -137,24 +157,44 @@ $AgentDirs = @(
 )
 
 foreach ($dir in $AgentDirs) {
-    if (-not (Test-Path -LiteralPath $dir)) {
-        New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    }
-    $targetFile = Join-Path $dir "AGENTS.md"
-    if (Get-Item -LiteralPath $targetFile -Force -ErrorAction SilentlyContinue) {
-        Remove-Item -LiteralPath $targetFile -Force
-    }
-    try {
-        New-Item -ItemType SymbolicLink -Path $targetFile -Target $SrcAgentsMd -ErrorAction Stop | Out-Null
-        Write-Host "已建立符号链接: $targetFile -> $SrcAgentsMd"
-    } catch {
-        New-Item -ItemType HardLink -Path $targetFile -Target $SrcAgentsMd -ErrorAction Stop | Out-Null
-        Write-Host "已建立硬链接: $targetFile <=> $SrcAgentsMd"
-    }
+    Set-FileLink -LinkPath (Join-Path $dir "AGENTS.md") -TargetPath $SrcAgentsMd
 }
 
 Write-Host "==> [5/5] 同步并安装 Antigravity 插件 (fast-io)..." -ForegroundColor Cyan
 Sync-GitRepo -RepoUrl $FastIoRepoUrl -DestDir $FastIoDir -Label "agy-fast-io"
-Set-DirectoryJunction -LinkPath $FastIoPluginLink -TargetPath (Join-Path $FastIoDir "plugin") -BackupRoot $PluginBackupDir
+
+# Antigravity 扫描 plugins/<name> 时不识别顶层 Junction，因此插件根目录须为真实目录，rules 子目录使用 Junction
+$FastIoPluginSrc = Join-Path $FastIoDir "plugin"
+$FastIoRulesTarget = Join-Path $FastIoPluginSrc "rules"
+$FastIoRulesLink = Join-Path $FastIoPluginLink "rules"
+
+$existingFastIo = Get-Item -LiteralPath $FastIoPluginLink -Force -ErrorAction SilentlyContinue
+if ($existingFastIo) {
+    if ($existingFastIo.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        Invoke-Native { cmd /c rmdir "$FastIoPluginLink" } "移除旧插件联接失败: $FastIoPluginLink"
+    } else {
+        $existingRules = Get-Item -LiteralPath $FastIoRulesLink -Force -ErrorAction SilentlyContinue
+        if (-not ($existingRules -and (Test-LinkToTarget -Item $existingRules -ExpectedTarget $FastIoRulesTarget))) {
+            New-Item -ItemType Directory -Force -Path $PluginBackupDir | Out-Null
+            $backupPath = Join-Path $PluginBackupDir "fast-io.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+            Write-Warning "路径 $FastIoPluginLink 已存在且非脚本接管目录，正在移出备份至 $backupPath..."
+            try {
+                Move-Item -LiteralPath $FastIoPluginLink -Destination $backupPath -ErrorAction Stop
+            } catch {
+                throw "无法备份旧插件目录 $FastIoPluginLink（可能正被占用），请关闭占用程序后重试: $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+if (-not (Test-Path -LiteralPath $FastIoPluginLink)) {
+    New-Item -ItemType Directory -Force -Path $FastIoPluginLink | Out-Null
+}
+Set-FileLink -LinkPath (Join-Path $FastIoPluginLink "plugin.json") -TargetPath (Join-Path $FastIoPluginSrc "plugin.json")
+$FastIoReadmeSrc = Join-Path $FastIoPluginSrc "README.md"
+if (Test-Path -LiteralPath $FastIoReadmeSrc) {
+    Set-FileLink -LinkPath (Join-Path $FastIoPluginLink "README.md") -TargetPath $FastIoReadmeSrc
+}
+Set-DirectoryJunction -LinkPath $FastIoRulesLink -TargetPath $FastIoRulesTarget -BackupRoot $PluginBackupDir
 
 Write-Host "`n✔ 安装完成！Antigravity（含 fast-io 插件）、kimi-code 与 dsh 已就绪并共享所有 Skills 与规范。" -ForegroundColor Green
