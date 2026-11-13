@@ -1,65 +1,99 @@
-﻿# Edmund724/skills 一键安装与同步脚本
+# Edmund724/skills 一键安装与同步脚本
 $ErrorActionPreference = "Stop"
 
 $RepoUrl = "https://github.com/Edmund724/skills.git"
 $DestDir = Join-Path $HOME ".agents\skills"
 $PluginDir = Join-Path $HOME ".gemini\config\plugins\user-skills"
-$GlobalAgentsMdDir = Join-Path $HOME ".gemini\config"
 
-Write-Host "==> [1/4] 同步 skills 仓库..." -ForegroundColor Cyan
-if (Test-Path "$DestDir\.git") {
-    Write-Host "检测到本地已存在仓库，正在更新..."
-    git -C "$DestDir" pull --ff-only
-} else {
-    if (Test-Path "$DestDir") {
-        Write-Warning "目录 $DestDir 已存在但不是 Git 仓库，建议备份后清理再运行。"
-    } else {
-        New-Item -ItemType Directory -Force -Path (Split-Path $DestDir) | Out-Null
-        git clone "$RepoUrl" "$DestDir"
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory)] [scriptblock]$Command,
+        [Parameter(Mandatory)] [string]$ErrorMessage
+    )
+    $global:LASTEXITCODE = 0
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$ErrorMessage (退出码: $LASTEXITCODE)"
     }
 }
 
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    throw "未检测到 git，请先安装 Git 后重试。"
+}
+
+Write-Host "==> [1/4] 同步 skills 仓库..." -ForegroundColor Cyan
+if (Test-Path -LiteralPath (Join-Path $DestDir ".git")) {
+    Write-Host "检测到本地已存在仓库，正在更新..."
+    Invoke-Native { git -C "$DestDir" pull --ff-only } "git pull 失败"
+} else {
+    if (Test-Path -LiteralPath $DestDir) {
+        $BackupDir = "$DestDir.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        Write-Warning "目录 $DestDir 已存在但不是 Git 仓库，正在备份至 $BackupDir..."
+        try {
+            Move-Item -LiteralPath $DestDir -Destination $BackupDir -ErrorAction Stop
+        } catch {
+            throw "无法备份旧目录 $DestDir（可能正被终端或编辑器占用），请关闭占用程序后重试: $($_.Exception.Message)"
+        }
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $DestDir) | Out-Null
+    Invoke-Native { git clone "$RepoUrl" "$DestDir" } "git clone 失败"
+}
+
 Write-Host "==> [2/4] 配置 Antigravity 插件元数据..." -ForegroundColor Cyan
-if (!(Test-Path $PluginDir)) {
+if (-not (Test-Path -LiteralPath $PluginDir)) {
     New-Item -ItemType Directory -Force -Path $PluginDir | Out-Null
 }
 $PluginJson = Join-Path $PluginDir "plugin.json"
-if (!(Test-Path $PluginJson)) {
-    '{"name":"user-skills","displayName":"User Skills","version":"1.0.0"}' | Set-Content -Encoding utf8 -Path $PluginJson
+if (-not (Test-Path -LiteralPath $PluginJson)) {
+    $jsonContent = '{"name":"user-skills","displayName":"User Skills","version":"1.0.0"}'
+    [System.IO.File]::WriteAllText($PluginJson, $jsonContent, [System.Text.UTF8Encoding]::new($false))
 }
 
 Write-Host "==> [3/4] 建立 skills 目录联接 (Junction)..." -ForegroundColor Cyan
 $PluginSkills = Join-Path $PluginDir "skills"
-if (!(Test-Path $PluginSkills)) {
-    cmd /c mklink /J "$PluginSkills" "$DestDir"
-} else {
-    Write-Host "联接已存在: $PluginSkills"
+$CreateJunction = $true
+$existingSkillLink = Get-Item -LiteralPath $PluginSkills -Force -ErrorAction SilentlyContinue
+if ($existingSkillLink) {
+    $isReparse = [bool]($existingSkillLink.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+    if ($isReparse -and ($existingSkillLink.Target -contains $DestDir)) {
+        Write-Host "联接已存在: $PluginSkills -> $DestDir"
+        $CreateJunction = $false
+    } elseif ($isReparse) {
+        Invoke-Native { cmd /c rmdir "$PluginSkills" } "移除旧联接失败: $PluginSkills"
+    } else {
+        throw "路径 $PluginSkills 已存在且不是目录联接，请备份清理后重试。"
+    }
+}
+if ($CreateJunction) {
+    Invoke-Native { cmd /c mklink /J "$PluginSkills" "$DestDir" } "创建目录联接失败"
 }
 
 Write-Host "==> [4/4] 链接全局 AGENTS.md 规范 (Antigravity / kimi-code / dsh)..." -ForegroundColor Cyan
 $SrcAgentsMd = Join-Path $DestDir "AGENTS.md"
+if (-not (Test-Path -LiteralPath $SrcAgentsMd)) {
+    throw "未找到源规范文件: $SrcAgentsMd"
+}
+
 $AgentDirs = @(
     (Join-Path $HOME ".gemini\config"),
     (Join-Path $HOME ".kimi-code"),
     (Join-Path $HOME ".dsh")
 )
 
-if (Test-Path $SrcAgentsMd) {
-    foreach ($dir in $AgentDirs) {
-        if (!(Test-Path $dir)) {
-            New-Item -ItemType Directory -Force -Path $dir | Out-Null
-        }
-        $targetFile = Join-Path $dir "AGENTS.md"
-        if (Test-Path $targetFile) {
-            Remove-Item -Force $targetFile
-        }
-        try {
-            New-Item -ItemType SymbolicLink -Path $targetFile -Target $SrcAgentsMd -ErrorAction Stop | Out-Null
-            Write-Host "已建立符号链接: $targetFile -> $SrcAgentsMd"
-        } catch {
-            New-Item -ItemType HardLink -Path $targetFile -Target $SrcAgentsMd -ErrorAction Stop | Out-Null
-            Write-Host "已建立硬链接: $targetFile <=> $SrcAgentsMd"
-        }
+foreach ($dir in $AgentDirs) {
+    if (-not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
+    $targetFile = Join-Path $dir "AGENTS.md"
+    if (Get-Item -LiteralPath $targetFile -Force -ErrorAction SilentlyContinue) {
+        Remove-Item -LiteralPath $targetFile -Force
+    }
+    try {
+        New-Item -ItemType SymbolicLink -Path $targetFile -Target $SrcAgentsMd -ErrorAction Stop | Out-Null
+        Write-Host "已建立符号链接: $targetFile -> $SrcAgentsMd"
+    } catch {
+        New-Item -ItemType HardLink -Path $targetFile -Target $SrcAgentsMd -ErrorAction Stop | Out-Null
+        Write-Host "已建立硬链接: $targetFile <=> $SrcAgentsMd"
     }
 }
 
