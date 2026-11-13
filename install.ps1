@@ -49,16 +49,38 @@ if (-not (Test-Path -LiteralPath $PluginJson)) {
     [System.IO.File]::WriteAllText($PluginJson, $jsonContent, [System.Text.UTF8Encoding]::new($false))
 }
 
+function Test-LinkToTarget {
+    param(
+        [Parameter(Mandatory)] $Item,
+        [Parameter(Mandatory)] [string]$ExpectedTarget
+    )
+    if (-not ($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        return $false
+    }
+    $normExpected = $ExpectedTarget.TrimEnd('\')
+    return [bool](@($Item.Target) | Where-Object { $_ -and ($_.TrimEnd('\') -eq $normExpected) })
+}
+
 Write-Host "==> [3/4] 建立 skills 目录联接 (Junction)..." -ForegroundColor Cyan
+$LegacyGlobalSkills = Join-Path $HOME ".gemini\config\skills"
+$legacyItem = Get-Item -LiteralPath $LegacyGlobalSkills -Force -ErrorAction SilentlyContinue
+if ($legacyItem) {
+    if (Test-LinkToTarget -Item $legacyItem -ExpectedTarget $DestDir) {
+        Invoke-Native { cmd /c rmdir "$LegacyGlobalSkills" } "移除重复旧联接失败: $LegacyGlobalSkills"
+        Write-Host "已移除重复的旧全局联接: $LegacyGlobalSkills"
+    } else {
+        Write-Warning "检测到 $LegacyGlobalSkills 已存在，若包含同名技能可能导致 Antigravity 重复加载，请按需清理。"
+    }
+}
+
 $PluginSkills = Join-Path $PluginDir "skills"
 $CreateJunction = $true
 $existingSkillLink = Get-Item -LiteralPath $PluginSkills -Force -ErrorAction SilentlyContinue
 if ($existingSkillLink) {
-    $isReparse = [bool]($existingSkillLink.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
-    if ($isReparse -and ($existingSkillLink.Target -contains $DestDir)) {
+    if (Test-LinkToTarget -Item $existingSkillLink -ExpectedTarget $DestDir) {
         Write-Host "联接已存在: $PluginSkills -> $DestDir"
         $CreateJunction = $false
-    } elseif ($isReparse) {
+    } elseif ($existingSkillLink.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
         Invoke-Native { cmd /c rmdir "$PluginSkills" } "移除旧联接失败: $PluginSkills"
     } else {
         throw "路径 $PluginSkills 已存在且不是目录联接，请备份清理后重试。"
