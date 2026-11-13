@@ -18,12 +18,13 @@ irm https://raw.githubusercontent.com/Edmund724/skills/main/install.ps1 | iex
    - `~/.gemini/config/AGENTS.md` (Antigravity)
    - `~/.kimi-code/AGENTS.md` (kimi-code)
    - `~/.dsh/AGENTS.md` (dsh)
+5. 克隆 / 更新 [agy-fast-io](https://github.com/Edmund724/agy-fast-io) 到 `~/.agents/agy-fast-io`，并建立 `~/.gemini/config/plugins/fast-io` 到 `~/.agents/agy-fast-io/plugin` 的目录联接（若已存在非联接的旧目录，则先移出备份至 `~/.gemini/config/plugins-backup`）
 
 ## 日常更新
 
-在任意终端运行：
+在任意终端重跑一键安装命令即可同时更新 `skills` 与 `agy-fast-io`，也可进入对应目录单独拉取：
 
 ```powershell
-cd ~/.agents/skills
-git pull
+git -C ~/.agents/skills pull
+git -C ~/.agents/agy-fast-io pull
 ```
