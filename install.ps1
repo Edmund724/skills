@@ -1,4 +1,4 @@
-# Edmund724/skills 一键安装与同步脚本
+﻿# Edmund724/skills 一键安装与同步脚本
 $ErrorActionPreference = "Stop"
 
 $RepoUrl = "https://github.com/Edmund724/skills.git"
@@ -116,6 +116,93 @@ function Set-FileLink {
     }
 }
 
+function Ensure-JsonObjectProperty {
+    param(
+        [Parameter(Mandatory)] $Object,
+        [Parameter(Mandatory)] [string]$Name,
+        [Parameter(Mandatory)] $DefaultValue
+    )
+    $prop = $Object.PSObject.Properties[$Name]
+    if (-not $prop -or $null -eq $prop.Value) {
+        $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $DefaultValue -Force
+    }
+    return $Object.PSObject.Properties[$Name].Value
+}
+
+function Merge-UniqueStringList {
+    param(
+        [Parameter(Mandatory)] $Container,
+        [Parameter(Mandatory)] [string]$PropertyName,
+        [Parameter(Mandatory)] [string[]]$RequiredItems
+    )
+    $prop = $Container.PSObject.Properties[$PropertyName]
+    $current = if ($prop -and $null -ne $prop.Value) { @($prop.Value | ForEach-Object { [string]$_ }) } else { @() }
+    $merged = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in $current) {
+        if ($merged -cnotcontains $item) {
+            $merged.Add($item)
+        }
+    }
+    $addedCount = 0
+    foreach ($item in $RequiredItems) {
+        if ($merged -cnotcontains $item) {
+            $merged.Add($item)
+            $addedCount++
+        }
+    }
+    if ($addedCount -gt 0 -or -not $prop -or $null -eq $prop.Value) {
+        $Container | Add-Member -NotePropertyName $PropertyName -NotePropertyValue ([string[]]$merged.ToArray()) -Force
+    }
+    return $addedCount
+}
+
+function Sync-AntigravityPermissions {
+    param(
+        [Parameter(Mandatory)] [string]$ConfigPath,
+        [Parameter(Mandatory)] [string[]]$AskRules,
+        [Parameter(Mandatory)] [string[]]$DenyRules
+    )
+    $configDir = Split-Path -Parent $ConfigPath
+    if (-not (Test-Path -LiteralPath $configDir)) {
+        New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+    }
+
+    $exists = Test-Path -LiteralPath $ConfigPath
+    if ($exists) {
+        $raw = [System.IO.File]::ReadAllText($ConfigPath, [System.Text.UTF8Encoding]::new($false))
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            $config = [PSCustomObject]@{}
+        } else {
+            $config = $raw | ConvertFrom-Json -ErrorAction Stop
+        }
+    } else {
+        $config = [PSCustomObject]@{}
+    }
+
+    $userSettings = Ensure-JsonObjectProperty -Object $config -Name "userSettings" -DefaultValue ([PSCustomObject]@{})
+    $grants = Ensure-JsonObjectProperty -Object $userSettings -Name "globalPermissionGrants" -DefaultValue ([PSCustomObject]@{})
+
+    $addedAsk = Merge-UniqueStringList -Container $grants -PropertyName "ask" -RequiredItems $AskRules
+    $addedDeny = Merge-UniqueStringList -Container $grants -PropertyName "deny" -RequiredItems $DenyRules
+    $totalAdded = $addedAsk + $addedDeny
+
+    if ($exists -and $totalAdded -eq 0) {
+        Write-Host "Antigravity ask/deny 规则已是最新，无需修改 config.json。"
+        return
+    }
+
+    if ($exists) {
+        $backupPath = "$ConfigPath.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        Copy-Item -LiteralPath $ConfigPath -Destination $backupPath -Force
+        Write-Host "已备份原配置至: $backupPath"
+    }
+
+    $jsonOut = $config | ConvertTo-Json -Depth 20
+    [System.IO.File]::WriteAllText($ConfigPath, $jsonOut, [System.Text.UTF8Encoding]::new($false))
+    Write-Host "已写入 Antigravity 权限规则（新增 ask: $addedAsk 条，deny: $addedDeny 条）。"
+    Write-Warning "若 Antigravity 正在运行，请先重启应用以加载最新权限规则，并避免运行时写回覆盖。"
+}
+
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     throw "未检测到 git，请先安装 Git 后重试。"
 }
@@ -196,5 +283,37 @@ if (Test-Path -LiteralPath $FastIoReadmeSrc) {
     Set-FileLink -LinkPath (Join-Path $FastIoPluginLink "README.md") -TargetPath $FastIoReadmeSrc
 }
 Set-DirectoryJunction -LinkPath $FastIoRulesLink -TargetPath $FastIoRulesTarget -BackupRoot $PluginBackupDir
+
+Write-Host "==> [6/6] 同步 Antigravity 权限规则 (ask / deny)..." -ForegroundColor Cyan
+$AntigravityConfigPath = Join-Path $HOME ".gemini\config\config.json"
+$AntigravityAskRules = @(
+    "command(curl)",
+    "command(Invoke-WebRequest)",
+    "command(iwr)",
+    "command(wget)",
+    "command(Invoke-RestMethod)",
+    "command(irm)",
+    "command(del)",
+    "command(Remove-Item)",
+    "command(rm)",
+    "command(ri)",
+    "command(rmdir)",
+    "command(rd)",
+    "command(erase)",
+    "command(Clear-Content)"
+)
+$AntigravityDenyRules = @(
+    "command(git clean)",
+    "command(format)",
+    "command(git reset --hard)",
+    "command(git checkout .)",
+    "command(git stash)",
+    "command(git commit --no-verify)",
+    "command(git push --force)",
+    "command(git push -f)",
+    "read_file($(Join-Path $HOME '.kimi-code'))",
+    "read_file($(Join-Path $HOME '.dsh'))"
+)
+Sync-AntigravityPermissions -ConfigPath $AntigravityConfigPath -AskRules $AntigravityAskRules -DenyRules $AntigravityDenyRules
 
 Write-Host "`n✔ 安装完成！Antigravity（含 fast-io 插件）、kimi-code 与 dsh 已就绪并共享所有 Skills 与规范。" -ForegroundColor Green

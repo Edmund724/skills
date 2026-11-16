@@ -19,6 +19,7 @@ irm https://raw.githubusercontent.com/Edmund724/skills/main/install.ps1 | iex
    - `~/.kimi-code/AGENTS.md` (kimi-code)
    - `~/.dsh/AGENTS.md` (dsh)
 5. 克隆 / 更新 [agy-fast-io](https://github.com/Edmund724/agy-fast-io) 到 `~/.agents/agy-fast-io`，创建 `~/.gemini/config/plugins/fast-io` 真实目录，链接 `plugin.json` / `README.md`，并建立 `rules` 到 `~/.agents/agy-fast-io/plugin/rules` 的目录联接（若已存在非脚本接管的旧目录，则先移出备份至 `~/.gemini/config/plugins-backup`）
+6. 增量去重合并 Antigravity 的 `ask` / `deny` 安全规则到 `~/.gemini/config/config.json`（保留机器原有插件、`allow` 与预设配置，修改前自动备份；`read_file` 拒绝路径按当前 `$HOME` 动态生成）
 
 ## 日常更新
 
