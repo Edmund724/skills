@@ -159,6 +159,7 @@ function Merge-UniqueStringList {
 function Sync-AntigravityPermissions {
     param(
         [Parameter(Mandatory)] [string]$ConfigPath,
+        [Parameter(Mandatory)] [string[]]$AllowRules,
         [Parameter(Mandatory)] [string[]]$AskRules,
         [Parameter(Mandatory)] [string[]]$DenyRules
     )
@@ -182,12 +183,13 @@ function Sync-AntigravityPermissions {
     $userSettings = Ensure-JsonObjectProperty -Object $config -Name "userSettings" -DefaultValue ([PSCustomObject]@{})
     $grants = Ensure-JsonObjectProperty -Object $userSettings -Name "globalPermissionGrants" -DefaultValue ([PSCustomObject]@{})
 
+    $addedAllow = Merge-UniqueStringList -Container $grants -PropertyName "allow" -RequiredItems $AllowRules
     $addedAsk = Merge-UniqueStringList -Container $grants -PropertyName "ask" -RequiredItems $AskRules
     $addedDeny = Merge-UniqueStringList -Container $grants -PropertyName "deny" -RequiredItems $DenyRules
-    $totalAdded = $addedAsk + $addedDeny
+    $totalAdded = $addedAllow + $addedAsk + $addedDeny
 
     if ($exists -and $totalAdded -eq 0) {
-        Write-Host "Antigravity ask/deny 规则已是最新，无需修改 config.json。"
+        Write-Host "Antigravity allow/ask/deny 规则已是最新，无需修改 config.json。"
         return
     }
 
@@ -199,7 +201,7 @@ function Sync-AntigravityPermissions {
 
     $jsonOut = $config | ConvertTo-Json -Depth 20
     [System.IO.File]::WriteAllText($ConfigPath, $jsonOut, [System.Text.UTF8Encoding]::new($false))
-    Write-Host "已写入 Antigravity 权限规则（新增 ask: $addedAsk 条，deny: $addedDeny 条）。"
+    Write-Host "已写入 Antigravity 权限规则（新增 allow: $addedAllow 条，ask: $addedAsk 条，deny: $addedDeny 条）。"
     Write-Warning "若 Antigravity 正在运行，请先重启应用以加载最新权限规则，并避免运行时写回覆盖。"
 }
 
@@ -284,8 +286,28 @@ if (Test-Path -LiteralPath $FastIoReadmeSrc) {
 }
 Set-DirectoryJunction -LinkPath $FastIoRulesLink -TargetPath $FastIoRulesTarget -BackupRoot $PluginBackupDir
 
-Write-Host "==> [6/6] 同步 Antigravity 权限规则 (ask / deny)..." -ForegroundColor Cyan
+Write-Host "==> [6/6] 同步 Antigravity 权限规则 (allow / ask / deny)..." -ForegroundColor Cyan
 $AntigravityConfigPath = Join-Path $HOME ".gemini\config\config.json"
+$AntigravityAllowRules = @(
+    "command(rg)",
+    "command(git status)",
+    "command(git diff)",
+    "command(git log)",
+    "command(git show)",
+    "command(git blame)",
+    "command(git ls-files)",
+    "command(git grep)",
+    "command(git rev-parse)",
+    "command(ls)",
+    "command(dir)",
+    "command(pwd)",
+    "command(Get-ChildItem)",
+    "command(Get-Location)",
+    "command(Get-Command)",
+    "command(Measure-Object)",
+    "command(where.exe)",
+    "command(tree)"
+)
 $AntigravityAskRules = @(
     "command(curl)",
     "command(Invoke-WebRequest)",
@@ -303,6 +325,7 @@ $AntigravityAskRules = @(
     "command(Clear-Content)"
 )
 $AntigravityDenyRules = @(
+    "command(rg --pre)",
     "command(git clean)",
     "command(format)",
     "command(git reset --hard)",
@@ -314,6 +337,6 @@ $AntigravityDenyRules = @(
     "read_file($(Join-Path $HOME '.kimi-code'))",
     "read_file($(Join-Path $HOME '.dsh'))"
 )
-Sync-AntigravityPermissions -ConfigPath $AntigravityConfigPath -AskRules $AntigravityAskRules -DenyRules $AntigravityDenyRules
+Sync-AntigravityPermissions -ConfigPath $AntigravityConfigPath -AllowRules $AntigravityAllowRules -AskRules $AntigravityAskRules -DenyRules $AntigravityDenyRules
 
 Write-Host "`n✔ 安装完成！Antigravity（含 fast-io 插件）、kimi-code 与 dsh 已就绪并共享所有 Skills 与规范。" -ForegroundColor Green
