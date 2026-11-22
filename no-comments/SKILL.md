@@ -1,5 +1,6 @@
 ---
 name: no-comments
+disable-model-invocation: true
 description: Clean up redundant comments, suppressions, and workarounds. Use when removing unnecessary comments or auditing comment quality in a diff or target files, or when running a repo-wide zero-comment migration with ADR archival, clustered debt issues, and a CI ratchet guard.
 ---
 
