@@ -1,0 +1,60 @@
+{
+  "targets": [
+    {
+      "name": "antigravity",
+      "detect": "~/.gemini/config",
+      "skillsDir": "~/.gemini/config/plugins/user-skills/skills",
+      "pluginJson": {
+        "path": "~/.gemini/config/plugins/user-skills/plugin.json",
+        "content": {
+          "name": "user-skills",
+          "displayName": "User Skills",
+          "version": "1.0.0"
+        }
+      },
+      "mode": "junction",
+      "exclude": [],
+      "rules": {
+        "src": "AGENTS.md",
+        "dest": "~/.gemini/config/AGENTS.md",
+        "mode": "link"
+      }
+    },
+    {
+      "name": "dsh",
+      "detect": "~/.dsh",
+      "skillsDir": "~/.dsh/skills",
+      "mode": "junction",
+      "exclude": [],
+      "rules": {
+        "src": "AGENTS.md",
+        "dest": "~/.dsh/AGENTS.md",
+        "mode": "link"
+      }
+    },
+    {
+      "name": "codex",
+      "detect": "~/.codex",
+      "skillsDir": "~/.codex/skills",
+      "mode": "copy",
+      "exclude": [],
+      "rules": {
+        "src": "AGENTS.md",
+        "dest": "~/.codex/AGENTS.md",
+        "mode": "block"
+      }
+    },
+    {
+      "name": "claude",
+      "detect": "~/.claude",
+      "skillsDir": "~/.claude/skills",
+      "mode": "junction",
+      "exclude": [],
+      "rules": {
+        "src": "AGENTS.md",
+        "dest": "~/.claude/CLAUDE.md",
+        "mode": "block"
+      }
+    }
+  ]
+}
