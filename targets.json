@@ -12,7 +12,7 @@
           "version": "1.0.0"
         }
       },
-      "mode": "junction",
+      "mode": "copy",
       "exclude": [],
       "rules": {
         "src": "AGENTS.md",
