@@ -238,11 +238,10 @@
     $PluginSkills = Join-Path $PluginDir "skills"
     Set-DirectoryJunction -LinkPath $PluginSkills -TargetPath $DestDir
 
-    Write-Host "==> [4/5] 链接全局 AGENTS.md 规范 (Antigravity / kimi-code / dsh)..." -ForegroundColor Cyan
+    Write-Host "==> [4/5] 链接全局 AGENTS.md 规范 (Antigravity / dsh)..." -ForegroundColor Cyan
     $SrcAgentsMd = Join-Path $DestDir "AGENTS.md"
     $AgentDirs = @(
         (Join-Path $HOME ".gemini\config"),
-        (Join-Path $HOME ".kimi-code"),
         (Join-Path $HOME ".dsh")
     )
 
@@ -335,11 +334,10 @@
         "command(git commit --no-verify)",
         "command(git push --force)",
         "command(git push -f)",
-        "read_file($(Join-Path $HOME '.kimi-code'))",
         "read_file($(Join-Path $HOME '.dsh'))"
     )
     Sync-AntigravityPermissions -ConfigPath $AntigravityConfigPath -AllowRules $AntigravityAllowRules -AskRules $AntigravityAskRules -DenyRules $AntigravityDenyRules
 
-    Write-Host "`n✔ 安装完成！Antigravity（含 fast-io 插件）、kimi-code 与 dsh 已就绪并共享所有 Skills 与规范。" -ForegroundColor Green
+    Write-Host "`n✔ 安装完成！Antigravity（含 fast-io 插件）与 dsh 已就绪并共享所有 Skills 与规范。" -ForegroundColor Green
 
 }

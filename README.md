@@ -16,7 +16,6 @@ irm https://raw.githubusercontent.com/Edmund724/skills/main/install.ps1 | iex
 3. 建立 `~/.gemini/config/plugins/user-skills/skills` 到 `~/.agents/skills` 的目录联接（Junction）
 4. 将 `AGENTS.md` 规范以软/硬链接形式自动挂载至各个 Agent 全局目录：
    - `~/.gemini/config/AGENTS.md` (Antigravity)
-   - `~/.kimi-code/AGENTS.md` (kimi-code)
    - `~/.dsh/AGENTS.md` (dsh)
 5. 克隆 / 更新 [agy-fast-io](https://github.com/Edmund724/agy-fast-io) 到 `~/.agents/agy-fast-io`，创建 `~/.gemini/config/plugins/fast-io` 真实目录，链接 `plugin.json` / `README.md`，并建立 `rules` 到 `~/.agents/agy-fast-io/plugin/rules` 的目录联接（若已存在非脚本接管的旧目录，则先移出备份至 `~/.gemini/config/plugins-backup`）
 6. 增量去重合并 Antigravity 的 `allow` / `ask` / `deny` 权限规则到 `~/.gemini/config/config.json`（保留机器原有插件、已有规则与预设配置，修改前自动备份；`read_file` 拒绝路径按当前 `$HOME` 动态生成）
