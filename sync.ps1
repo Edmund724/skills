@@ -842,7 +842,9 @@ foreach ($t in $selectedTargets) {
         continue
     }
 
-    Write-Host "==> 同步目标: $($t.name) ($($t.mode))" -ForegroundColor Cyan
+    $hasSkillsDir = $t.PSObject.Properties["skillsDir"] -and -not [string]::IsNullOrWhiteSpace([string]$t.skillsDir)
+    $modeLabel = if ($hasSkillsDir) { [string]$t.mode } else { "rules-only" }
+    Write-Host "==> 同步目标: $($t.name) ($modeLabel)" -ForegroundColor Cyan
 
     if ($t.PSObject.Properties["pluginJson"] -and $null -ne $t.pluginJson) {
         $pluginJsonPath = Expand-UserPath $t.pluginJson.path
@@ -861,24 +863,26 @@ foreach ($t in $selectedTargets) {
         }
     }
 
-    $skillsDir = Expand-UserPath $t.skillsDir
-    $dirState = Initialize-SkillsDir -SkillsDir $skillsDir
-    if (-not $dirState.Ready) {
-        continue
-    }
-
-    $excludeList = if ($t.PSObject.Properties["exclude"] -and $null -ne $t.exclude) { @($t.exclude) } else { @() }
-    $activeSkills = Get-SourceSkills -Root $RepoRoot -ExcludePatterns $excludeList
-
-    switch ($t.mode) {
-        "junction" {
-            Sync-SkillsJunctionMode -SkillsDir $skillsDir -ActiveSkills $activeSkills -CanInspectChildren $dirState.CanInspectChildren
+    if ($hasSkillsDir) {
+        $skillsDir = Expand-UserPath $t.skillsDir
+        $dirState = Initialize-SkillsDir -SkillsDir $skillsDir
+        if (-not $dirState.Ready) {
+            continue
         }
-        "copy" {
-            Sync-SkillsCopyMode -SkillsDir $skillsDir -ActiveSkills $activeSkills -CanInspectChildren $dirState.CanInspectChildren
-        }
-        default {
-            throw "目标 $($t.name) 配置了不支持的同步模式: $($t.mode)"
+
+        $excludeList = if ($t.PSObject.Properties["exclude"] -and $null -ne $t.exclude) { @($t.exclude) } else { @() }
+        $activeSkills = Get-SourceSkills -Root $RepoRoot -ExcludePatterns $excludeList
+
+        switch ($t.mode) {
+            "junction" {
+                Sync-SkillsJunctionMode -SkillsDir $skillsDir -ActiveSkills $activeSkills -CanInspectChildren $dirState.CanInspectChildren
+            }
+            "copy" {
+                Sync-SkillsCopyMode -SkillsDir $skillsDir -ActiveSkills $activeSkills -CanInspectChildren $dirState.CanInspectChildren
+            }
+            default {
+                throw "目标 $($t.name) 配置了不支持的同步模式: $($t.mode)"
+            }
         }
     }
 

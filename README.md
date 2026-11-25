@@ -53,7 +53,7 @@ irm https://raw.githubusercontent.com/Edmund724/skills/main/install.ps1 | iex
 }
 ```
 
-- **技能发现**：仅挂载仓库根目录下直接包含 `SKILL.md` 的一级子目录，`exclude` 支持通配符（`-like`）过滤。
+- **技能发现**：仅挂载仓库根目录下直接包含 `SKILL.md` 的一级子目录，`exclude` 支持通配符（`-like`）过滤；原生可读取 `~/.agents/skills` 的工具（如 `dsh`）可省略 `skillsDir` 与 `mode`，仅同步 `rules`。
 - **`mode = "junction"`**：逐技能建立目录联接，自动清理已删除或被排除的孤儿联接，保留目标目录中用户自建的真实目录与外部联接。
 - **`mode = "copy"`**：复制技能目录并在 `skillsDir/.managed-skills.json` 中追踪托管清单，增量刷新并回收孤儿副本，不覆盖未列入清单的本地真实目录。
 - **`rules.mode = "link"`**：优先建立符号链接，无权限时回退硬链接；若目标原为不同内容的普通文件，先备份为 `.bak-yyyyMMdd-HHmmss`。

@@ -23,9 +23,6 @@
     {
       "name": "dsh",
       "detect": "~/.dsh",
-      "skillsDir": "~/.dsh/skills",
-      "mode": "junction",
-      "exclude": [],
       "rules": {
         "src": "AGENTS.md",
         "dest": "~/.dsh/AGENTS.md",
