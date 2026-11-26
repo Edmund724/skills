@@ -20,6 +20,7 @@
   - **清理动作**：移除 worktree（`git worktree remove`）、删除对应分支（`git branch -D`）及独立构建缓存目录（如 `target`）
   - **删除前置（二选一）**：已合并进 `main`；或未合并时先提交改动并打 `archive/<worktree名>` tag 存档
   - **例外**：因冲突或待裁决需保留时，在最终回复中显式列出路径与原因
+- 使用 `gh` 读取 GitHub Issue/PR 时必须显式传 `--json`（如 `gh issue view <n> --json number,title,body,labels,comments`、`gh pr view <n> --json number,title,body,labels,comments,files`）或改用 `gh api`；禁止裸跑 `gh issue view` / `gh pr view`（含仅加 `--comments`），非 TTY 环境下会返回 exit 0 且无输出
 
 ## 修改纪律与架构维护
 
