@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$Pull,
     [switch]$DryRun,
@@ -10,9 +10,6 @@ $ErrorActionPreference = "Stop"
 $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $RepoRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
 $ConfigFile = Join-Path $RepoRoot "targets.json"
-$ManifestFileName = ".managed-skills.json"
-$BlockBegin = "<!-- skills-sync:begin -->"
-$BlockEnd = "<!-- skills-sync:end -->"
 $FastIoRepoUrl = "https://github.com/Edmund724/agy-fast-io.git"
 
 function Write-Action {
@@ -88,33 +85,6 @@ function Test-LinkToTarget {
     }
     $normExpected = Normalize-ComparePath $ExpectedTarget
     return [bool]($targets | Where-Object { $_ -ieq $normExpected })
-}
-
-function Test-PathUnderRoot {
-    param(
-        [Parameter(Mandatory)] [string]$CandidatePath,
-        [Parameter(Mandatory)] [string]$RootPath
-    )
-    $normCandidate = Normalize-ComparePath $CandidatePath
-    $normRoot = Normalize-ComparePath $RootPath
-    if ($normCandidate -ieq $normRoot) {
-        return $true
-    }
-    return $normCandidate.StartsWith("$normRoot\", [System.StringComparison]::OrdinalIgnoreCase)
-}
-
-function Test-LinkUnderRoot {
-    param(
-        [Parameter(Mandatory)] $Item,
-        [Parameter(Mandatory)] [string]$RootPath
-    )
-    $targets = Get-ReparseTargets -Item $Item
-    foreach ($t in $targets) {
-        if (Test-PathUnderRoot -CandidatePath $t -RootPath $RootPath) {
-            return $true
-        }
-    }
-    return $false
 }
 
 function Remove-JunctionSafe {
@@ -255,315 +225,6 @@ function Set-FileLink {
     }
 }
 
-function Sync-RuleBlock {
-    param(
-        [Parameter(Mandatory)] [string]$SrcPath,
-        [Parameter(Mandatory)] [string]$DestPath
-    )
-    if (-not (Test-Path -LiteralPath $SrcPath)) {
-        throw "未找到源规则文件: $SrcPath"
-    }
-    $srcRaw = [System.IO.File]::ReadAllText($SrcPath, $Utf8NoBom)
-    $nl = if ($srcRaw.Contains("`r`n")) { "`r`n" } else { "`n" }
-    $srcBody = $srcRaw.TrimEnd("`r", "`n")
-    $block = "$BlockBegin$nl$srcBody$nl$BlockEnd"
-
-    $existing = Get-Item -LiteralPath $DestPath -Force -ErrorAction SilentlyContinue
-    if ($existing -and -not [string]::IsNullOrEmpty($existing.LinkType)) {
-        $isLinkedToSrc = ($existing.LinkType -eq "SymbolicLink" -and (Test-LinkToTarget -Item $existing -ExpectedTarget $SrcPath)) -or
-            ($existing.LinkType -eq "HardLink" -and (Test-SameFileContent -PathA $DestPath -PathB $SrcPath))
-        if ($isLinkedToSrc) {
-            $newContent = "$block$nl"
-            if ($DryRun) {
-                Write-Action "将解除旧规则链接并写入 block 托管文件: $DestPath"
-                return
-            }
-            Remove-Item -LiteralPath $DestPath -Force
-            [System.IO.File]::WriteAllText($DestPath, $newContent, $Utf8NoBom)
-            Write-Action "已解除旧规则链接并转为 block 托管文件: $DestPath"
-            return
-        }
-        $existingContent = [System.IO.File]::ReadAllText($DestPath, $Utf8NoBom)
-        if ($DryRun) {
-            Write-Action "将解除外部链接并转为独立 block 托管文件: $DestPath"
-            return
-        }
-        Remove-Item -LiteralPath $DestPath -Force
-        $destContent = $existingContent
-    } elseif ($existing) {
-        $destContent = [System.IO.File]::ReadAllText($DestPath, $Utf8NoBom)
-    } else {
-        $newContent = "$block$nl"
-        if ($DryRun) {
-            Write-Action "将创建规则文件 (block): $DestPath"
-            return
-        }
-        $parentDir = Split-Path -Parent $DestPath
-        if (-not (Test-Path -LiteralPath $parentDir)) {
-            New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
-        }
-        [System.IO.File]::WriteAllText($DestPath, $newContent, $Utf8NoBom)
-        Write-Action "已创建规则文件 (block): $DestPath"
-        return
-    }
-
-    $destNl = if ($destContent.Contains("`r`n")) { "`r`n" } else { $nl }
-    $normalizedBlock = $block.Replace("`r`n", "`n").Replace("`n", $destNl)
-    $pattern = "(?s)$([regex]::Escape($BlockBegin)).*?$([regex]::Escape($BlockEnd))"
-
-    if ([regex]::IsMatch($destContent, $pattern)) {
-        $newContent = [regex]::Replace($destContent, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{
-            param($m)
-            return $normalizedBlock
-        }, 1)
-    } elseif ([string]::IsNullOrWhiteSpace($destContent)) {
-        $newContent = "$normalizedBlock$destNl"
-    } else {
-        $trimmed = $destContent.TrimEnd("`r", "`n")
-        $newContent = "$trimmed$destNl$destNl$normalizedBlock$destNl"
-    }
-
-    if ($newContent -ceq $destContent) {
-        return
-    }
-    if ($DryRun) {
-        Write-Action "将更新规则块 (block): $DestPath"
-        return
-    }
-    [System.IO.File]::WriteAllText($DestPath, $newContent, $Utf8NoBom)
-    Write-Action "已更新规则块 (block): $DestPath"
-}
-
-function Get-SourceSkills {
-    param(
-        [Parameter(Mandatory)] [string]$Root,
-        [string[]]$ExcludePatterns
-    )
-    $dirs = Get-ChildItem -LiteralPath $Root -Directory | Sort-Object Name
-    $result = [System.Collections.Generic.List[System.IO.DirectoryInfo]]::new()
-    foreach ($dir in $dirs) {
-        if (-not (Test-Path -LiteralPath (Join-Path $dir.FullName "SKILL.md") -PathType Leaf)) {
-            continue
-        }
-        $excluded = $false
-        foreach ($pattern in @($ExcludePatterns)) {
-            if (-not [string]::IsNullOrWhiteSpace($pattern) -and ($dir.Name -like $pattern)) {
-                $excluded = $true
-                break
-            }
-        }
-        if (-not $excluded) {
-            $result.Add($dir)
-        }
-    }
-    return $result
-}
-
-function Initialize-SkillsDir {
-    param(
-        [Parameter(Mandatory)] [string]$SkillsDir
-    )
-    $existing = Get-Item -LiteralPath $SkillsDir -Force -ErrorAction SilentlyContinue
-    if ($existing) {
-        if ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-            if (Test-LinkToTarget -Item $existing -ExpectedTarget $RepoRoot) {
-                Remove-JunctionSafe -LinkPath $SkillsDir -Reason "迁移整目录联接"
-                if ($DryRun) {
-                    Write-Action "将创建技能目录: $SkillsDir"
-                    return @{ Ready = $true; CanInspectChildren = $false }
-                }
-                New-Item -ItemType Directory -Force -Path $SkillsDir | Out-Null
-                Write-Action "已创建技能目录: $SkillsDir"
-                return @{ Ready = $true; CanInspectChildren = $true }
-            }
-            Write-Error "技能目录 $SkillsDir 是指向未知目标的联接 ($(@($existing.Target) -join ', '))，已中止该目标，请手工检查。" -ErrorAction Continue
-            return @{ Ready = $false; CanInspectChildren = $false }
-        }
-        return @{ Ready = $true; CanInspectChildren = $true }
-    }
-
-    if ($DryRun) {
-        Write-Action "将创建技能目录: $SkillsDir"
-        return @{ Ready = $true; CanInspectChildren = $false }
-    }
-    New-Item -ItemType Directory -Force -Path $SkillsDir | Out-Null
-    return @{ Ready = $true; CanInspectChildren = $true }
-}
-
-function Sync-SkillsJunctionMode {
-    param(
-        [Parameter(Mandatory)] [string]$SkillsDir,
-        [Parameter(Mandatory)] [System.Collections.Generic.List[System.IO.DirectoryInfo]]$ActiveSkills,
-        [Parameter(Mandatory)] [bool]$CanInspectChildren
-    )
-    $activeNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($skill in $ActiveSkills) {
-        [void]$activeNames.Add($skill.Name)
-    }
-
-    foreach ($skill in $ActiveSkills) {
-        $linkPath = Join-Path $SkillsDir $skill.Name
-        if (-not $CanInspectChildren) {
-            New-JunctionSafe -LinkPath $linkPath -TargetPath $skill.FullName
-            continue
-        }
-        $existing = Get-Item -LiteralPath $linkPath -Force -ErrorAction SilentlyContinue
-        if ($existing) {
-            if (Test-LinkToTarget -Item $existing -ExpectedTarget $skill.FullName) {
-                continue
-            }
-            if (Test-LinkUnderRoot -Item $existing -RootPath $RepoRoot) {
-                Remove-JunctionSafe -LinkPath $linkPath -Reason "修正技能联接"
-                New-JunctionSafe -LinkPath $linkPath -TargetPath $skill.FullName
-            } else {
-                Write-Warning "跳过同名本地目录或外部联接: $linkPath"
-            }
-        } else {
-            New-JunctionSafe -LinkPath $linkPath -TargetPath $skill.FullName
-        }
-    }
-
-    if (-not $CanInspectChildren) {
-        return
-    }
-
-    foreach ($item in (Get-ChildItem -LiteralPath $SkillsDir -Force)) {
-        if (-not ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
-            continue
-        }
-        if (-not (Test-LinkUnderRoot -Item $item -RootPath $RepoRoot)) {
-            continue
-        }
-        if (-not $activeNames.Contains($item.Name)) {
-            Remove-JunctionSafe -LinkPath $item.FullName -Reason "清理孤儿联接"
-        }
-    }
-}
-
-function Read-ManagedManifest {
-    param(
-        [Parameter(Mandatory)] [string]$ManifestPath
-    )
-    $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
-        return $set
-    }
-    $raw = [System.IO.File]::ReadAllText($ManifestPath, $Utf8NoBom)
-    if ([string]::IsNullOrWhiteSpace($raw)) {
-        return $set
-    }
-    $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
-    foreach ($entry in @($parsed)) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$entry)) {
-            [void]$set.Add([string]$entry)
-        }
-    }
-    return $set
-}
-
-function Sync-SkillsCopyMode {
-    param(
-        [Parameter(Mandatory)] [string]$SkillsDir,
-        [Parameter(Mandatory)] [System.Collections.Generic.List[System.IO.DirectoryInfo]]$ActiveSkills,
-        [Parameter(Mandatory)] [bool]$CanInspectChildren
-    )
-    $manifestPath = Join-Path $SkillsDir $ManifestFileName
-    $managedSet = if ($CanInspectChildren) {
-        Read-ManagedManifest -ManifestPath $manifestPath
-    } else {
-        [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    }
-
-    $activeNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($skill in $ActiveSkills) {
-        [void]$activeNames.Add($skill.Name)
-    }
-
-    $nextManaged = [System.Collections.Generic.List[string]]::new()
-
-    foreach ($skill in $ActiveSkills) {
-        $destSkillDir = Join-Path $SkillsDir $skill.Name
-        $existing = if ($CanInspectChildren) {
-            Get-Item -LiteralPath $destSkillDir -Force -ErrorAction SilentlyContinue
-        } else {
-            $null
-        }
-
-        if (-not $existing) {
-            if ($DryRun) {
-                Write-Action "将复制技能目录: $($skill.FullName) -> $destSkillDir"
-            } else {
-                Copy-Item -LiteralPath $skill.FullName -Destination $destSkillDir -Recurse -Force
-                Write-Action "已复制技能目录: $destSkillDir"
-            }
-            $nextManaged.Add($skill.Name)
-            continue
-        }
-
-        if (($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -and (Test-LinkUnderRoot -Item $existing -RootPath $RepoRoot)) {
-            Remove-JunctionSafe -LinkPath $destSkillDir -Reason "切换为 copy 模式"
-            if ($DryRun) {
-                Write-Action "将复制技能目录: $($skill.FullName) -> $destSkillDir"
-            } else {
-                Copy-Item -LiteralPath $skill.FullName -Destination $destSkillDir -Recurse -Force
-                Write-Action "已复制技能目录: $destSkillDir"
-            }
-            $nextManaged.Add($skill.Name)
-            continue
-        }
-
-        if ($managedSet.Contains($skill.Name) -and -not ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
-            if ($DryRun) {
-                Write-Action "将刷新托管技能副本: $destSkillDir"
-            } else {
-                Remove-Item -LiteralPath $destSkillDir -Recurse -Force
-                Copy-Item -LiteralPath $skill.FullName -Destination $destSkillDir -Recurse -Force
-                Write-Action "已刷新托管技能副本: $destSkillDir"
-            }
-            $nextManaged.Add($skill.Name)
-            continue
-        }
-
-        Write-Warning "跳过未托管的本地目录或外部联接: $destSkillDir"
-    }
-
-    if ($CanInspectChildren) {
-        foreach ($oldName in $managedSet) {
-            if ($activeNames.Contains($oldName)) {
-                continue
-            }
-            $orphanPath = Join-Path $SkillsDir $oldName
-            $orphanItem = Get-Item -LiteralPath $orphanPath -Force -ErrorAction SilentlyContinue
-            if (-not $orphanItem) {
-                continue
-            }
-            if ($orphanItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-                Remove-JunctionSafe -LinkPath $orphanPath -Reason "清理孤儿托管项"
-            } elseif ($DryRun) {
-                Write-Action "将删除孤儿托管副本: $orphanPath"
-            } else {
-                Remove-Item -LiteralPath $orphanPath -Recurse -Force
-                Write-Action "已删除孤儿托管副本: $orphanPath"
-            }
-        }
-    }
-
-    $sortedNext = @($nextManaged | Sort-Object -Unique)
-    $manifestJson = ConvertTo-Json -InputObject $sortedNext -Depth 5
-    if ($DryRun) {
-        Write-Action "将更新托管清单: $manifestPath"
-        return
-    }
-    $currentRaw = if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
-        [System.IO.File]::ReadAllText($manifestPath, $Utf8NoBom)
-    } else {
-        $null
-    }
-    if ($currentRaw -cne $manifestJson) {
-        [System.IO.File]::WriteAllText($manifestPath, $manifestJson, $Utf8NoBom)
-    }
-}
-
 function Ensure-JsonObjectProperty {
     param(
         [Parameter(Mandatory)] $Object,
@@ -667,6 +328,16 @@ function Sync-AntigravityExtras {
             Remove-JunctionSafe -LinkPath $legacyGlobalSkills -Reason "移除重复旧全局联接"
         } else {
             Write-Warning "检测到 $legacyGlobalSkills 已存在，若包含同名技能可能导致 Antigravity 重复加载，请按需清理。"
+        }
+    }
+
+    $legacyUserSkillsPlugin = Join-Path $geminiConfigDir "plugins\user-skills"
+    if (Test-Path -LiteralPath $legacyUserSkillsPlugin) {
+        if ($DryRun) {
+            Write-Action "将移除重复旧技能插件目录: $legacyUserSkillsPlugin"
+        } else {
+            Remove-Item -LiteralPath $legacyUserSkillsPlugin -Recurse -Force
+            Write-Action "已移除重复旧技能插件目录: $legacyUserSkillsPlugin"
         }
     }
 
@@ -842,49 +513,7 @@ foreach ($t in $selectedTargets) {
         continue
     }
 
-    $hasSkillsDir = $t.PSObject.Properties["skillsDir"] -and -not [string]::IsNullOrWhiteSpace([string]$t.skillsDir)
-    $modeLabel = if ($hasSkillsDir) { [string]$t.mode } else { "rules-only" }
-    Write-Host "==> 同步目标: $($t.name) ($modeLabel)" -ForegroundColor Cyan
-
-    if ($t.PSObject.Properties["pluginJson"] -and $null -ne $t.pluginJson) {
-        $pluginJsonPath = Expand-UserPath $t.pluginJson.path
-        if (-not (Test-Path -LiteralPath $pluginJsonPath)) {
-            if ($DryRun) {
-                Write-Action "将创建插件元数据: $pluginJsonPath"
-            } else {
-                $pluginDir = Split-Path -Parent $pluginJsonPath
-                if (-not (Test-Path -LiteralPath $pluginDir)) {
-                    New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
-                }
-                $pluginJsonText = $t.pluginJson.content | ConvertTo-Json -Depth 10
-                [System.IO.File]::WriteAllText($pluginJsonPath, $pluginJsonText, $Utf8NoBom)
-                Write-Action "已创建插件元数据: $pluginJsonPath"
-            }
-        }
-    }
-
-    if ($hasSkillsDir) {
-        $skillsDir = Expand-UserPath $t.skillsDir
-        $dirState = Initialize-SkillsDir -SkillsDir $skillsDir
-        if (-not $dirState.Ready) {
-            continue
-        }
-
-        $excludeList = if ($t.PSObject.Properties["exclude"] -and $null -ne $t.exclude) { @($t.exclude) } else { @() }
-        $activeSkills = Get-SourceSkills -Root $RepoRoot -ExcludePatterns $excludeList
-
-        switch ($t.mode) {
-            "junction" {
-                Sync-SkillsJunctionMode -SkillsDir $skillsDir -ActiveSkills $activeSkills -CanInspectChildren $dirState.CanInspectChildren
-            }
-            "copy" {
-                Sync-SkillsCopyMode -SkillsDir $skillsDir -ActiveSkills $activeSkills -CanInspectChildren $dirState.CanInspectChildren
-            }
-            default {
-                throw "目标 $($t.name) 配置了不支持的同步模式: $($t.mode)"
-            }
-        }
-    }
+    Write-Host "==> 同步目标: $($t.name) (rules-only)" -ForegroundColor Cyan
 
     if ($t.PSObject.Properties["rules"] -and $null -ne $t.rules) {
         $ruleSrcRaw = [string]$t.rules.src
@@ -897,9 +526,6 @@ foreach ($t in $selectedTargets) {
         switch ($t.rules.mode) {
             "link" {
                 Set-FileLink -LinkPath $ruleDest -TargetPath $ruleSrc
-            }
-            "block" {
-                Sync-RuleBlock -SrcPath $ruleSrc -DestPath $ruleDest
             }
             default {
                 throw "目标 $($t.name) 配置了不支持的规则模式: $($t.rules.mode)"
