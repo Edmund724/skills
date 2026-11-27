@@ -17,12 +17,16 @@ Ground every assessment and refactor in the project's domain model and shared de
 
 ### 1. Explore
 
-**Scope before you scan (YAGNI).** Deepening pays off where code keeps changing:
+**Scope before you scan (YAGNI).** Deepening pays off most where code keeps changing, with a bounded fallback so repeated runs do not stall on the same files or miss structural debt:
 
-- If the user named a target (a module, subsystem, or pain point), scope to that area.
-- Otherwise, inspect recent commit history (`git log --oneline`) to find hot spots—files and clusters that churn repeatedly—and focus there first. Widen the net only when history has no clear hot spots.
+- **Explicit target**: If the user named a target (a module, subsystem, or pain point), scope directly to that area.
+- **Pass 1 — Recent hot spots**: Otherwise, bound the history window instead of scanning unbounded history:
+  - Prefer commits since the latest version tag (`<last-tag>..HEAD` via `git describe --tags --abbrev=0`).
+  - Fall back to the last 5 days (`git log --since="5 days ago"`) if the repo has no tags, `<last-tag>..HEAD` is empty, or the latest tag is too old/broad to isolate current work (e.g., older than 14 days).
+  - Rank hot spots by feature and bug-fix churn, excluding pure refactoring/deepening commits and deprioritizing modules already deepened in this window unless new non-refactor churn appeared afterward.
+- **Pass 2 — Cold-spot structural debt (fallback)**: Only when Pass 1 finds no clear hot spots or no hot-spot candidate clears the deletion test, scan low-churn areas for high-leverage structural debt—specifically high fan-in shared modules with shallow/leaky interfaces, tightly coupled small-module clusters, or untested/awkward-to-test core behaviour. Skip stable, isolated cold code with low fan-in and low friction.
 
-Read `GLOSSARY.md` and any ADRs covering the target area, then spawn an **exploration subagent** to walk the code and locate genuine friction:
+Read `GLOSSARY.md` and any ADRs covering the target area, then spawn an **exploration subagent** to walk the scoped code and locate genuine friction:
 
 - Understanding one concept requires bouncing across many small modules
 - **Shallow** modules whose interface is nearly as complex as their implementation
@@ -30,7 +34,7 @@ Read `GLOSSARY.md` and any ADRs covering the target area, then spawn an **explor
 - Tightly-coupled modules leaking internal details across seams
 - Behaviour that is untested or awkward to test through its current interface
 
-Filter suspects with the **deletion test**: keep only candidates where merging or reshaping genuinely concentrates complexity rather than shifting it around. For each worthwhile candidate, record the involved files, dependency category (per `DEEPENING.md`), target seam and interface shape, and triage bucket (`auto-execute` vs. `escalate`). If nothing clears the bar, state that concisely and stop.
+Filter suspects with the **deletion test**: keep only candidates where merging or reshaping genuinely concentrates complexity rather than shifting it around. For each worthwhile candidate, record the involved files, dependency category (per `DEEPENING.md`), target seam and interface shape, and triage bucket (`auto-execute` vs. `escalate`). If neither Pass 1 nor the Pass 2 fallback clears the bar (or an explicit target yields no worthwhile candidates), state that concisely and stop.
 
 ### 2. Triage: dispatch vs. ask
 
@@ -56,4 +60,4 @@ Dispatch **implementer subagents** for all `auto-execute` candidates (and any `e
 
 - Merge completed worktree branches back into the working branch and run verification across the combined changes.
 - Clean up every temporary worktree (`git worktree remove`), temporary branch (`git branch -D`, or tag `archive/<worktree>` first if unmerged without conflict resolution), and isolated build caches; explicitly report any worktree retained due to unresolved conflicts.
-- Report a concise summary of deepened modules, test/glossary updates, and any escalated items awaiting user input.
+- Report a concise summary of the scan scope (hot-spot window or cold-spot fallback), deepened modules, test/glossary updates, and any escalated items awaiting user input.
